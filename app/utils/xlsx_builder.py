@@ -5,7 +5,6 @@ import polars as pl
 from app.schemas.receipt import ReceiptData
 
 COLUMNS = [
-    "Arquivo",
     "Controle Interno",
     "Data",
     "Cliente",
@@ -39,7 +38,6 @@ def receipts_to_rows(
 
     for filename, receipt in receipts:
         base = {
-            "Arquivo": filename,
             "Controle Interno": receipt.controle_interno,
             "Data": receipt.data,
             "Cliente": receipt.cliente,
