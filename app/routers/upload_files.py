@@ -1,17 +1,8 @@
-from datetime import datetime
-from io import BytesIO
 from typing import Annotated, List
-
 from fastapi import APIRouter, File, HTTPException
 from fastapi import UploadFile as UF
-from fastapi.responses import StreamingResponse
 from pydantic import WithJsonSchema
 
-from app.connectors.openai import extract_many
-from app.utils.base64 import bytes_to_base64
-from app.utils.image_processing import preprocess_image
-from app.utils.validators import DocumentValidator
-from app.utils.xlsx_builder import receipts_to_xlsx
 from app.services.upload_service import upload_service_files
 
 
@@ -21,9 +12,6 @@ UploadFile = Annotated[
 ]
 
 router = APIRouter(prefix="/upload")
-
-
-
 
 @router.post("/multiple")
 async def upload_multiple_files(files: List[UploadFile] = File(...)):

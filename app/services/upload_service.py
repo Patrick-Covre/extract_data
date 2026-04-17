@@ -12,7 +12,6 @@ from app.utils.image_processing import preprocess_image
 from app.utils.validators import DocumentValidator
 from app.utils.xlsx_builder import receipts_to_xlsx
 
-
 doc_validator = DocumentValidator(max_size=25 * 1024 * 1024)
 
 XLSX_MEDIA_TYPE = (
