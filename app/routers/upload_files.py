@@ -1,90 +1,86 @@
-from fastapi import APIRouter, File, HTTPException, Form, Depends, Request
-from fastapi.templating import Jinja2Templates
-from fastapi import UploadFile as UF
-from pydantic import WithJsonSchema
-from typing import List
-from app.utils.base64 import bytes_to_base64
-import uuid
-from pathlib import Path
 from datetime import datetime
+from io import BytesIO
+from typing import Annotated, List
+
+from fastapi import APIRouter, File, HTTPException
+from fastapi import UploadFile as UF
+from fastapi.responses import StreamingResponse
+from pydantic import WithJsonSchema
+
+from app.connectors.openai import extract_many
+from app.utils.base64 import bytes_to_base64
+from app.utils.image_processing import preprocess_image
 from app.utils.validators import DocumentValidator
-from app.connectors.openai import send_message_ia
-from typing import Annotated
+from app.utils.xlsx_builder import receipts_to_xlsx
 
 UploadFile = Annotated[
     UF,
-    WithJsonSchema({
-        "type": "string",
-        "format": "binary"
-    })
+    WithJsonSchema({"type": "string", "format": "binary"}),
 ]
-
-templates = Jinja2Templates(directory="templates")
-
 
 router = APIRouter(prefix="/upload")
 
-UPLOAD_DIR = Path("uploads")
-
-
 doc_validator = DocumentValidator(max_size=25 * 1024 * 1024)
 
-MIME_BY_EXT = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".pdf": "application/pdf",
-}
+XLSX_MEDIA_TYPE = (
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+
 
 @router.post("/multiple")
-async def upload_multiple_files(request: Request, prompt: str = Form(...), files: List[UploadFile] = File(...)):
-    """Upload multiple files with validation"""
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+async def upload_multiple_files(files: List[UploadFile] = File(...)):
+    """Recebe múltiplas imagens de notas, extrai os dados via IA e devolve um
+    arquivo .xlsx para download."""
+    if not files:
+        raise HTTPException(status_code=400, detail="Nenhum arquivo enviado")
 
-    results = []
-    images = []
+    prepared: list[tuple[str, str, str]] = []  # (filename, b64, mime)
+    errors: list[dict] = []
 
     for file in files:
-        # Validate each file
         validation = await doc_validator.validate_file(file)
-
         if not validation["valid"]:
-            results.append({
-                "filename": file.filename,
-                "success": False,
-                "errors": validation["errors"]
-            })
+            errors.append(
+                {"filename": file.filename, "errors": validation["errors"]}
+            )
             continue
 
-        file_ext = Path(file.filename).suffix.lower()
-        unique_filename = f"{uuid.uuid4()}{file_ext}"
-        file_path = UPLOAD_DIR / unique_filename
-
         try:
-            data = await file.read()
-            file_path.write_bytes(data)
-            b64 = bytes_to_base64(data)
-            mime = MIME_BY_EXT.get(file_ext, "application/octet-stream")
+            raw = await file.read()
+            processed_bytes, mime = preprocess_image(raw)
+            b64 = bytes_to_base64(processed_bytes)
+            prepared.append((file.filename, b64, mime))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(
+                {
+                    "filename": file.filename,
+                    "errors": [f"Falha ao processar imagem: {exc}"],
+                }
+            )
 
-            images.append((b64, mime))
+    if not prepared:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "Nenhum arquivo válido", "errors": errors},
+        )
 
-            results.append({
-                "filename": file.filename,
-                "stored_filename": unique_filename,
-                "success": True,
-            })
-        except Exception as e:
-            results.append({
-                "filename": file.filename,
-                "success": False,
-                "errors": [f"Failed to save: {str(e)}"]
-            })
+    images = [(b64, mime) for _, b64, mime in prepared]
+    receipts = await extract_many(images)
+    named_receipts = list(zip([p[0] for p in prepared], receipts))
 
-    successful = [r for r in results if r["success"]]
-    failed = [r for r in results if not r["success"]]
+    xlsx_bytes = receipts_to_xlsx(named_receipts)
 
-    return templates.TemplateResponse(
-        request,
-        "index.html",
-        {"message": await send_message_ia(prompt, images)},
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"notas_{timestamp}.xlsx"
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "X-Processed-Files": str(len(prepared)),
+        "X-Skipped-Files": str(len(errors)),
+    }
+
+    return StreamingResponse(
+        BytesIO(xlsx_bytes),
+        media_type=XLSX_MEDIA_TYPE,
+        headers=headers,
     )

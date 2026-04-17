@@ -1,0 +1,24 @@
+[project]
+name = "extract-data"
+version = "1"
+description = "Extracao de dados"
+authors = [
+    {name = "Patrick Covre Rodrigues"}
+]
+license = "Se for usar dar os creditos"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi[standard] (>=0.136.0,<0.137.0)",
+    "openai (>=2.32.0,<3.0.0)",
+    "polars (>=1.39.3,<2.0.0)",
+    "pillow (>=11.0.0,<12.0.0)",
+    "xlsxwriter (>=3.2.0,<4.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+package-mode = false
